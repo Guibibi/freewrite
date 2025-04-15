@@ -43,6 +43,217 @@ struct HeartEmoji: Identifiable {
     var offset: CGFloat = 0
 }
 
+struct CustomColorPickerView: View {
+    @Binding var customBackgroundColor: Color
+    @Binding var isUsingCustomColor: Bool
+    @Binding var showingColorMenu: Bool
+    var popoverBackgroundColor: Color
+    var popoverTextColor: Color
+    var currentColorScheme: ColorScheme  // Add this to pass in the current color scheme
+    
+    @State private var hexString: String = ""
+    @State private var showingHexError: Bool = false
+    @State private var previewColor: Color
+    @State private var isPreviewActive: Bool = false
+    
+    // Initialize with the current color
+    init(customBackgroundColor: Binding<Color>, isUsingCustomColor: Binding<Bool>, 
+         showingColorMenu: Binding<Bool>, popoverBackgroundColor: Color, popoverTextColor: Color,
+         currentColorScheme: ColorScheme) {
+        self._customBackgroundColor = customBackgroundColor
+        self._isUsingCustomColor = isUsingCustomColor
+        self._showingColorMenu = showingColorMenu
+        self.popoverBackgroundColor = popoverBackgroundColor
+        self.popoverTextColor = popoverTextColor
+        self.currentColorScheme = currentColorScheme
+        
+        // Initialize preview color with the current color
+        self._previewColor = State(initialValue: customBackgroundColor.wrappedValue)
+    }
+    
+    // Predefined minimal color palette
+    let presetColors: [[Color]] = [
+        [.white, Color(red: 0.95, green: 0.95, blue: 0.95), Color(red: 0.9, green: 0.9, blue: 0.9), Color(red: 0.8, green: 0.8, blue: 0.8)],
+        [Color(red: 0.95, green: 0.95, blue: 0.9), Color(red: 0.9, green: 1.0, blue: 0.9), Color(red: 0.9, green: 0.95, blue: 1.0), Color(red: 0.95, green: 0.9, blue: 0.95)],
+        [Color(red: 0.2, green: 0.2, blue: 0.2), Color(red: 0.1, green: 0.1, blue: 0.1), .black, Color(red: 0.05, green: 0.05, blue: 0.1)],
+        [Color(red: 0.9, green: 0.8, blue: 0.7), Color(red: 0.2, green: 0.3, blue: 0.4), Color(red: 0.2, green: 0.2, blue: 0.3), Color(red: 0.05, green: 0.1, blue: 0.15)]
+    ]
+    
+   
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Background Color")
+                .font(.headline)
+                .padding(.top, 5)
+            
+            // Color grid
+            VStack(spacing: 8) {
+                ForEach(presetColors.indices, id: \.self) { row in
+                    HStack(spacing: 8) {
+                        ForEach(presetColors[row].indices, id: \.self) { col in
+                            let color = presetColors[row][col]
+                            Button(action: {
+                                previewColor = color
+                                isPreviewActive = true
+                                customBackgroundColor = color // Live preview
+                                updateHexString(from: color)
+                            }) {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(color)
+                                    .frame(width: 36, height: 36)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .stroke(Color.gray.opacity(0.5), lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal)
+            
+            Divider()
+                .padding(.horizontal)
+            
+            // Hex input
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Hex Color")
+                    .font(.subheadline)
+                
+                HStack {
+                    Text("#")
+                        .foregroundColor(.gray)
+                    
+                    TextField("RRGGBB", text: $hexString)
+                        .font(.system(.body, design: .monospaced))
+                        .onChange(of: hexString) { newValue in
+                            // Allow only hex characters and cap at 6
+                            let filtered = newValue.filter { "0123456789ABCDEFabcdef".contains($0) }
+                            if filtered.count <= 6 {
+                                hexString = filtered.uppercased()
+                            } else {
+                                hexString = String(filtered.prefix(6)).uppercased()
+                            }
+                        }
+                    
+                    Button("Apply") {
+                        if let color = colorFromHex(hexString) {
+                            previewColor = color
+                            isPreviewActive = true
+                            customBackgroundColor = color // Live preview
+                            showingHexError = false
+                        } else {
+                            showingHexError = true
+                        }
+                    }
+                    .disabled(hexString.count < 6)
+                    .buttonStyle(.bordered)
+                }
+                
+                if showingHexError {
+                    Text("Invalid hex color")
+                        .foregroundColor(.red)
+                        .font(.caption)
+                }
+            }
+            .padding(.horizontal)
+            
+            Divider()
+                .padding(.horizontal)
+            
+            // Action buttons
+            HStack(spacing: 12) {
+                Button(action: {
+                    // Keep the current preview as permanent
+                    isUsingCustomColor = true
+                    showingColorMenu = false
+                    
+                    // Save custom color to UserDefaults
+                    if let colorData = try? NSKeyedArchiver.archivedData(withRootObject: NSColor(customBackgroundColor), requiringSecureCoding: false) {
+                        UserDefaults.standard.set(colorData, forKey: "customBackgroundColor")
+                        UserDefaults.standard.set(true, forKey: "isUsingCustomColor")
+                    }
+                }) {
+                    Text("Save")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                
+                Button(action: {
+                    // Reject the preview and revert
+                    if isPreviewActive {
+                        // Revert to the previous color
+                        customBackgroundColor = isUsingCustomColor ? 
+                            previewColor : // Keep the permanent color if we were using one
+                            (currentColorScheme == .light ? .white : .black) // Or revert to theme default
+                        
+                        isPreviewActive = false
+                    } else {
+                        // Reset to theme defaults
+                        isUsingCustomColor = false
+                        customBackgroundColor = currentColorScheme == .light ? .white : .black
+                        
+                        // Remove custom color from UserDefaults
+                        UserDefaults.standard.removeObject(forKey: "customBackgroundColor")
+                        UserDefaults.standard.set(false, forKey: "isUsingCustomColor")
+                    }
+                    
+                    showingColorMenu = false
+                }) {
+                    Text(isPreviewActive ? "Cancel" : "Reset")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!isPreviewActive && !isUsingCustomColor)
+            }
+            .padding(.horizontal)
+        }
+        .padding(.vertical, 10)
+        .frame(width: 250)
+        .background(popoverBackgroundColor)
+        .foregroundColor(popoverTextColor)
+        .onAppear {
+            updateHexString(from: customBackgroundColor)
+        }
+        .onDisappear {
+            if isPreviewActive && !isUsingCustomColor {
+                // If we're just previewing and not saved, revert to the previous state
+                customBackgroundColor = currentColorScheme == .light ? .white : .black
+            }
+        }
+    }
+    
+    private func updateHexString(from color: Color) {
+        let nsColor = NSColor(color)
+        let red = Int(round(nsColor.redComponent * 255))
+        let green = Int(round(nsColor.greenComponent * 255))
+        let blue = Int(round(nsColor.blueComponent * 255))
+        hexString = String(format: "%02X%02X%02X", red, green, blue)
+    }
+    
+    private func colorFromHex(_ hex: String) -> Color? {
+        var hexSanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        hexSanitized = hexSanitized.replacingOccurrences(of: "#", with: "")
+        
+        if hexSanitized.count != 6 {
+            return nil
+        }
+        
+        var rgb: UInt64 = 0
+        guard Scanner(string: hexSanitized).scanHexInt64(&rgb) else {
+            return nil
+        }
+        
+        let r = Double((rgb & 0xFF0000) >> 16) / 255.0
+        let g = Double((rgb & 0x00FF00) >> 8) / 255.0
+        let b = Double(rgb & 0x0000FF) / 255.0
+        
+        return Color(red: r, green: g, blue: b)
+    }
+}
+
 struct ContentView: View {
     private let headerString = "\n\n"
     @State private var entries: [HumanEntry] = []
@@ -84,6 +295,10 @@ struct ContentView: View {
     @State private var isHoveringHistoryArrow = false
     @State private var colorScheme: ColorScheme = .light // Add state for color scheme
     @State private var isHoveringThemeToggle = false // Add state for theme toggle hover
+    @State private var isHoveringColorPicker = false // Add state for color picker hover
+    @State private var customBackgroundColor = Color.white // Add state for custom background color
+    @State private var showingColorMenu = false // Add state for color menu
+    @State private var isUsingCustomColor = false // Track if using custom color
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     let entryHeight: CGFloat = 40
     
@@ -154,6 +369,13 @@ struct ContentView: View {
         // Load saved color scheme preference
         let savedScheme = UserDefaults.standard.string(forKey: "colorScheme") ?? "light"
         _colorScheme = State(initialValue: savedScheme == "dark" ? .dark : .light)
+        
+        // Load saved custom background color if available
+        if let colorData = UserDefaults.standard.data(forKey: "customBackgroundColor"),
+           let uiColor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSColor.self, from: colorData) {
+            _customBackgroundColor = State(initialValue: Color(uiColor))
+            _isUsingCustomColor = State(initialValue: UserDefaults.standard.bool(forKey: "isUsingCustomColor"))
+        }
     }
     
     // Modify getDocumentsDirectory to use cached value
@@ -381,6 +603,21 @@ struct ContentView: View {
         return colorScheme == .light ? Color.primary : Color.white
     }
     
+    var backgroundColor: Color {
+        // Always show custom color if it's set, regardless of where it came from
+        return customBackgroundColor
+    }
+    
+    var textEditorColor: Color {
+        if isUsingCustomColor {
+            // For dark custom backgrounds, use light text; for light backgrounds, use dark text
+            let brightness = NSColor(customBackgroundColor).brightnessComponent
+            return brightness < 0.5 ? Color(red: 0.9, green: 0.9, blue: 0.9) : Color(red: 0.2, green: 0.2, blue: 0.2)
+        } else {
+            return colorScheme == .light ? Color(red: 0.20, green: 0.20, blue: 0.20) : Color(red: 0.9, green: 0.9, blue: 0.9)
+        }
+    }
+    
     var body: some View {
         let buttonBackground = colorScheme == .light ? Color.white : Color.black
         let navHeight: CGFloat = 68
@@ -390,7 +627,7 @@ struct ContentView: View {
         HStack(spacing: 0) {
             // Main content
             ZStack {
-                Color(colorScheme == .light ? .white : .black)
+                backgroundColor
                     .ignoresSafeArea()
                 
                 TextEditor(text: Binding(
@@ -404,9 +641,9 @@ struct ContentView: View {
                         }
                     }
                 ))
-                    .background(Color(colorScheme == .light ? .white : .black))
+                    .background(backgroundColor)
                     .font(.custom(selectedFont, size: fontSize))
-                    .foregroundColor(colorScheme == .light ? Color(red: 0.20, green: 0.20, blue: 0.20) : Color(red: 0.9, green: 0.9, blue: 0.9))
+                    .foregroundColor(textEditorColor)
                     .scrollContentBackground(.hidden)
                     .scrollIndicators(.never)
                     .lineSpacing(lineHeight)
@@ -727,6 +964,10 @@ struct ContentView: View {
                                 colorScheme = colorScheme == .light ? .dark : .light
                                 // Save preference
                                 UserDefaults.standard.set(colorScheme == .light ? "light" : "dark", forKey: "colorScheme")
+                                // Reset custom color when toggling theme
+                                if isUsingCustomColor {
+                                    isUsingCustomColor = false
+                                }
                             }) {
                                 Image(systemName: colorScheme == .light ? "moon.fill" : "sun.max.fill")
                                     .foregroundColor(isHoveringThemeToggle ? textHoverColor : textColor)
@@ -740,6 +981,37 @@ struct ContentView: View {
                                 } else {
                                     NSCursor.pop()
                                 }
+                            }
+
+                            Text("•")
+                                .foregroundColor(.gray)
+                                
+                            // Color picker button
+                            Button(action: {
+                                showingColorMenu.toggle()
+                            }) {
+                                Image(systemName: "paintpalette")
+                                    .foregroundColor(isHoveringColorPicker ? textHoverColor : textColor)
+                            }
+                            .buttonStyle(.plain)
+                            .onHover { hovering in
+                                isHoveringColorPicker = hovering
+                                isHoveringBottomNav = hovering
+                                if hovering {
+                                    NSCursor.pointingHand.push()
+                                } else {
+                                    NSCursor.pop()
+                                }
+                            }
+                            .popover(isPresented: $showingColorMenu, attachmentAnchor: .point(UnitPoint(x: 0.5, y: 0)), arrowEdge: .top) {
+                                CustomColorPickerView(
+                                    customBackgroundColor: $customBackgroundColor,
+                                    isUsingCustomColor: $isUsingCustomColor,
+                                    showingColorMenu: $showingColorMenu,
+                                    popoverBackgroundColor: popoverBackgroundColor,
+                                    popoverTextColor: popoverTextColor,
+                                    currentColorScheme: colorScheme
+                                )
                             }
 
                             Text("•")
@@ -772,7 +1044,7 @@ struct ContentView: View {
                         }
                     }
                     .padding()
-                    .background(Color(colorScheme == .light ? .white : .black))
+                    .background(backgroundColor)
                     .opacity(bottomNavOpacity)
                     .onHover { hovering in
                         isHoveringBottomNav = hovering
