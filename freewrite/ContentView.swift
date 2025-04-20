@@ -46,10 +46,14 @@ struct HeartEmoji: Identifiable {
 struct CustomColorPickerView: View {
     @Binding var customBackgroundColor: Color
     @Binding var isUsingCustomColor: Bool
+    @Binding var isUsingCustomLightColor: Bool
+    @Binding var isUsingCustomDarkColor: Bool
+    @Binding var lightModeBackgroundColor: Color
+    @Binding var darkModeBackgroundColor: Color
     @Binding var showingColorMenu: Bool
     var popoverBackgroundColor: Color
     var popoverTextColor: Color
-    var currentColorScheme: ColorScheme  // Add this to pass in the current color scheme
+    var currentColorScheme: ColorScheme
     
     @State private var hexString: String = ""
     @State private var showingHexError: Bool = false
@@ -57,11 +61,23 @@ struct CustomColorPickerView: View {
     @State private var isPreviewActive: Bool = false
     
     // Initialize with the current color
-    init(customBackgroundColor: Binding<Color>, isUsingCustomColor: Binding<Bool>, 
-         showingColorMenu: Binding<Bool>, popoverBackgroundColor: Color, popoverTextColor: Color,
+    init(customBackgroundColor: Binding<Color>, 
+         isUsingCustomColor: Binding<Bool>,
+         isUsingCustomLightColor: Binding<Bool>,
+         isUsingCustomDarkColor: Binding<Bool>,
+         lightModeBackgroundColor: Binding<Color>,
+         darkModeBackgroundColor: Binding<Color>,
+         showingColorMenu: Binding<Bool>, 
+         popoverBackgroundColor: Color, 
+         popoverTextColor: Color,
          currentColorScheme: ColorScheme) {
+        
         self._customBackgroundColor = customBackgroundColor
         self._isUsingCustomColor = isUsingCustomColor
+        self._isUsingCustomLightColor = isUsingCustomLightColor
+        self._isUsingCustomDarkColor = isUsingCustomDarkColor
+        self._lightModeBackgroundColor = lightModeBackgroundColor
+        self._darkModeBackgroundColor = darkModeBackgroundColor
         self._showingColorMenu = showingColorMenu
         self.popoverBackgroundColor = popoverBackgroundColor
         self.popoverTextColor = popoverTextColor
@@ -167,13 +183,23 @@ struct CustomColorPickerView: View {
             HStack(spacing: 12) {
                 Button(action: {
                     // Keep the current preview as permanent
-                    isUsingCustomColor = true
                     showingColorMenu = false
                     
-                    // Save custom color to UserDefaults
-                    if let colorData = try? NSKeyedArchiver.archivedData(withRootObject: NSColor(customBackgroundColor), requiringSecureCoding: false) {
-                        UserDefaults.standard.set(colorData, forKey: "customBackgroundColor")
-                        UserDefaults.standard.set(true, forKey: "isUsingCustomColor")
+                    // Save appropriate color based on the current color scheme
+                    if currentColorScheme == .light {
+                        isUsingCustomLightColor = true
+                        lightModeBackgroundColor = customBackgroundColor
+                        if let colorData = try? NSKeyedArchiver.archivedData(withRootObject: NSColor(customBackgroundColor), requiringSecureCoding: false) {
+                            UserDefaults.standard.set(colorData, forKey: "lightModeBackgroundColor")
+                            UserDefaults.standard.set(true, forKey: "isUsingCustomLightColor")
+                        }
+                    } else {
+                        isUsingCustomDarkColor = true
+                        darkModeBackgroundColor = customBackgroundColor
+                        if let colorData = try? NSKeyedArchiver.archivedData(withRootObject: NSColor(customBackgroundColor), requiringSecureCoding: false) {
+                            UserDefaults.standard.set(colorData, forKey: "darkModeBackgroundColor")
+                            UserDefaults.standard.set(true, forKey: "isUsingCustomDarkColor")
+                        }
                     }
                 }) {
                     Text("Save")
@@ -184,20 +210,35 @@ struct CustomColorPickerView: View {
                 Button(action: {
                     // Reject the preview and revert
                     if isPreviewActive {
-                        // Revert to the previous color
-                        customBackgroundColor = isUsingCustomColor ? 
-                            previewColor : // Keep the permanent color if we were using one
-                            (currentColorScheme == .light ? .white : .black) // Or revert to theme default
+                        // Revert to the previous color based on current scheme
+                        if currentColorScheme == .light {
+                            customBackgroundColor = isUsingCustomLightColor ? lightModeBackgroundColor : .white
+                        } else {
+                            customBackgroundColor = isUsingCustomDarkColor ? darkModeBackgroundColor : .black
+                        }
                         
                         isPreviewActive = false
                     } else {
-                        // Reset to theme defaults
-                        isUsingCustomColor = false
-                        customBackgroundColor = currentColorScheme == .light ? .white : .black
-                        
-                        // Remove custom color from UserDefaults
-                        UserDefaults.standard.removeObject(forKey: "customBackgroundColor")
-                        UserDefaults.standard.set(false, forKey: "isUsingCustomColor")
+                        // Reset to theme defaults for the current scheme
+                        if currentColorScheme == .light {
+                            // Reset light mode to default
+                            isUsingCustomLightColor = false
+                            lightModeBackgroundColor = .white
+                            customBackgroundColor = .white
+                            
+                            // Remove custom light color from UserDefaults
+                            UserDefaults.standard.removeObject(forKey: "lightModeBackgroundColor")
+                            UserDefaults.standard.set(false, forKey: "isUsingCustomLightColor")
+                        } else {
+                            // Reset dark mode to default
+                            isUsingCustomDarkColor = false
+                            darkModeBackgroundColor = .black
+                            customBackgroundColor = .black
+                            
+                            // Remove custom dark color from UserDefaults
+                            UserDefaults.standard.removeObject(forKey: "darkModeBackgroundColor")
+                            UserDefaults.standard.set(false, forKey: "isUsingCustomDarkColor")
+                        }
                     }
                     
                     showingColorMenu = false
@@ -206,7 +247,8 @@ struct CustomColorPickerView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .disabled(!isPreviewActive && !isUsingCustomColor)
+                .disabled(!isPreviewActive && 
+                          (currentColorScheme == .light ? !isUsingCustomLightColor : !isUsingCustomDarkColor))
             }
             .padding(.horizontal)
         }
@@ -218,9 +260,13 @@ struct CustomColorPickerView: View {
             updateHexString(from: customBackgroundColor)
         }
         .onDisappear {
-            if isPreviewActive && !isUsingCustomColor {
+            if isPreviewActive {
                 // If we're just previewing and not saved, revert to the previous state
-                customBackgroundColor = currentColorScheme == .light ? .white : .black
+                if currentColorScheme == .light {
+                    customBackgroundColor = isUsingCustomLightColor ? lightModeBackgroundColor : .white
+                } else {
+                    customBackgroundColor = isUsingCustomDarkColor ? darkModeBackgroundColor : .black
+                }
             }
         }
     }
@@ -297,8 +343,12 @@ struct ContentView: View {
     @State private var isHoveringThemeToggle = false // Add state for theme toggle hover
     @State private var isHoveringColorPicker = false // Add state for color picker hover
     @State private var customBackgroundColor = Color.white // Add state for custom background color
+    @State private var lightModeBackgroundColor = Color.white // Background color for light mode
+    @State private var darkModeBackgroundColor = Color.black // Background color for dark mode
     @State private var showingColorMenu = false // Add state for color menu
     @State private var isUsingCustomColor = false // Track if using custom color
+    @State private var isUsingCustomLightColor = false // Track if using custom light color
+    @State private var isUsingCustomDarkColor = false // Track if using custom dark color
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     let entryHeight: CGFloat = 40
     
@@ -370,11 +420,28 @@ struct ContentView: View {
         let savedScheme = UserDefaults.standard.string(forKey: "colorScheme") ?? "light"
         _colorScheme = State(initialValue: savedScheme == "dark" ? .dark : .light)
         
-        // Load saved custom background color if available
-        if let colorData = UserDefaults.standard.data(forKey: "customBackgroundColor"),
-           let uiColor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSColor.self, from: colorData) {
-            _customBackgroundColor = State(initialValue: Color(uiColor))
-            _isUsingCustomColor = State(initialValue: UserDefaults.standard.bool(forKey: "isUsingCustomColor"))
+        // Load saved custom light mode background color
+        if let lightColorData = UserDefaults.standard.data(forKey: "lightModeBackgroundColor"),
+           let lightNSColor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSColor.self, from: lightColorData) {
+            _lightModeBackgroundColor = State(initialValue: Color(lightNSColor))
+            _isUsingCustomLightColor = State(initialValue: UserDefaults.standard.bool(forKey: "isUsingCustomLightColor"))
+        }
+        
+        // Load saved custom dark mode background color
+        if let darkColorData = UserDefaults.standard.data(forKey: "darkModeBackgroundColor"),
+           let darkNSColor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSColor.self, from: darkColorData) {
+            _darkModeBackgroundColor = State(initialValue: Color(darkNSColor))
+            _isUsingCustomDarkColor = State(initialValue: UserDefaults.standard.bool(forKey: "isUsingCustomDarkColor"))
+        }
+        
+        // Set initial customBackgroundColor based on the current color scheme
+        let initialScheme = savedScheme == "dark" ? ColorScheme.dark : .light
+        if initialScheme == .light {
+            _customBackgroundColor = State(initialValue: _isUsingCustomLightColor.wrappedValue ? _lightModeBackgroundColor.wrappedValue : Color.white)
+            _isUsingCustomColor = _isUsingCustomLightColor
+        } else {
+            _customBackgroundColor = State(initialValue: _isUsingCustomDarkColor.wrappedValue ? _darkModeBackgroundColor.wrappedValue : Color.black)
+            _isUsingCustomColor = _isUsingCustomDarkColor
         }
     }
     
@@ -604,14 +671,20 @@ struct ContentView: View {
     }
     
     var backgroundColor: Color {
-        // Always show custom color if it's set, regardless of where it came from
-        return customBackgroundColor
+        // Return appropriate color based on color scheme
+        if colorScheme == .light {
+            return isUsingCustomLightColor ? lightModeBackgroundColor : Color.white
+        } else {
+            return isUsingCustomDarkColor ? darkModeBackgroundColor : Color.black
+        }
     }
     
     var textEditorColor: Color {
-        if isUsingCustomColor {
+        let currentBgColor = backgroundColor
+        
+        if (colorScheme == .light && isUsingCustomLightColor) || (colorScheme == .dark && isUsingCustomDarkColor) {
             // For dark custom backgrounds, use light text; for light backgrounds, use dark text
-            let brightness = NSColor(customBackgroundColor).brightnessComponent
+            let brightness = NSColor(currentBgColor).brightnessComponent
             return brightness < 0.5 ? Color(red: 0.9, green: 0.9, blue: 0.9) : Color(red: 0.2, green: 0.2, blue: 0.2)
         } else {
             return colorScheme == .light ? Color(red: 0.20, green: 0.20, blue: 0.20) : Color(red: 0.9, green: 0.9, blue: 0.9)
@@ -961,12 +1034,17 @@ struct ContentView: View {
                             
                             // Theme toggle button
                             Button(action: {
+                                // Toggle color scheme
                                 colorScheme = colorScheme == .light ? .dark : .light
+                                
                                 // Save preference
                                 UserDefaults.standard.set(colorScheme == .light ? "light" : "dark", forKey: "colorScheme")
-                                // Reset custom color when toggling theme
-                                if isUsingCustomColor {
-                                    isUsingCustomColor = false
+                                
+                                // Update customBackgroundColor based on the new color scheme
+                                if colorScheme == .light {
+                                    customBackgroundColor = isUsingCustomLightColor ? lightModeBackgroundColor : .white
+                                } else {
+                                    customBackgroundColor = isUsingCustomDarkColor ? darkModeBackgroundColor : .black
                                 }
                             }) {
                                 Image(systemName: colorScheme == .light ? "moon.fill" : "sun.max.fill")
@@ -988,6 +1066,12 @@ struct ContentView: View {
                                 
                             // Color picker button
                             Button(action: {
+                                // Update customBackgroundColor to the current scheme's value before showing the picker
+                                if colorScheme == .light {
+                                    customBackgroundColor = isUsingCustomLightColor ? lightModeBackgroundColor : .white
+                                } else {
+                                    customBackgroundColor = isUsingCustomDarkColor ? darkModeBackgroundColor : .black
+                                }
                                 showingColorMenu.toggle()
                             }) {
                                 Image(systemName: "paintpalette")
@@ -1007,6 +1091,10 @@ struct ContentView: View {
                                 CustomColorPickerView(
                                     customBackgroundColor: $customBackgroundColor,
                                     isUsingCustomColor: $isUsingCustomColor,
+                                    isUsingCustomLightColor: $isUsingCustomLightColor,
+                                    isUsingCustomDarkColor: $isUsingCustomDarkColor,
+                                    lightModeBackgroundColor: $lightModeBackgroundColor,
+                                    darkModeBackgroundColor: $darkModeBackgroundColor,
                                     showingColorMenu: $showingColorMenu,
                                     popoverBackgroundColor: popoverBackgroundColor,
                                     popoverTextColor: popoverTextColor,
